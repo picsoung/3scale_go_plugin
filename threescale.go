@@ -1,58 +1,29 @@
 package go3scale
 
-import "fmt"
-import "errors"
-import "strconv"
-import "github.com/parnurzeal/gorequest"
+import (
+	"bytes"
+	"io/ioutil"
+	"net/http"
+	"strconv"
+)
+
+const (
+	userAgentHeaderKey   = "X-3scale-User-Agent"
+	userAgentHeaderValue = "plugin-golang-v#test"
+)
 
 // Client is identified by its ProviderKey and Host
 type Client struct {
 	ProviderKey, Host string
+	httpClient        *http.Client
 }
 
-func clientParams(args ...interface{}) (providerKey string, host string, err error){
-
-  host = "su1.3scale.net"
-  if 1 > len(args) {
-      err = errors.New("Not enough parameters to init Client")
-      return
-  }
-
-  for i,p := range args {
-    switch i {
-	    case 0: // name
-        param, ok := p.(string)
-        if !ok {
-            err = errors.New("ProviderKey parameter not type string.")
-            return
-        }
-        providerKey = param
-
-	    case 1: // x
-        param, ok := p.(string)
-        if !ok {
-            err = errors.New("Host parameter not type string.")
-            return
-        }
-        host = param
-	    default:
-        err = errors.New("Too many parameters")
-        return
-    }
-  }
-  return
-}
-
-//New Creates a new Client
-func New(args ...interface{}) (client *Client) {
-	providerKey, host, err := clientParams(args...)
-	if nil != err {
-    panic(err.Error())
-  }
-
+// NewClient Creates a new Client
+func NewClient(providerKey, host string) (client *Client) {
 	return &Client{
 		ProviderKey: providerKey,
 		Host:        host,
+		httpClient:  http.DefaultClient,
 	}
 }
 
@@ -62,97 +33,57 @@ type Usage struct {
 	Value int
 }
 
-func authrepUserKeyParams(args ...interface{}) (userKey string, usageArr []Usage, err error){
-	var arr []Usage
-	arr = append(arr,Usage{Name:"hits",Value:1})
-	usageArr = arr
+// AuthrepUserKey authenticates a request with userKey
+func (client *Client) AuthrepUserKey(userKey string, usageArr []Usage) (Response, error) {
+	req, err := http.NewRequest("GET", createURL(client, userKey, usageArr), nil)
+	if err != nil {
+		return Response{}, err
+	}
 
-  if 1 > len(args) {
-      err = errors.New("Not enough parameters for AuthrepUserKey")
-      return
-  }
+	req.Header.Add(userAgentHeaderKey, userAgentHeaderValue)
+	res, err := client.httpClient.Do(req)
+	if err != nil {
+		return Response{}, err
+	}
+	defer res.Body.Close()
 
-  for i,p := range args {
-    switch i {
-	    case 0: // userKey
-        param, ok := p.(string)
-        if !ok {
-            err = errors.New("userKey parameter not type string.")
-            return
-        }
-        userKey = param
+	body, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return Response{}, err
+	}
 
-			case 1: // usage
-        param, ok := p.([]Usage)
-        if !ok {
-            err = errors.New("usage parameter not type Usage.")
-            return
-        }
-        usageArr = param
-	    default:
-        err = errors.New("Too many parameters")
-        return
-    }
-  }
-  return
+	response := Response{
+		Code:    res.StatusCode,
+		Message: string(body),
+	}
+	return response, nil
 }
 
-//AuthrepUserKey authenticates a request with userKey
-func (client *Client) AuthrepUserKey(args ...interface{}) Response {
-	userKey, usageArr, err := authrepUserKeyParams(args...)
-	if nil != err {
-    panic(err.Error())
-  }
-
-	r := new(Response)
-	url := "/transactions/authrep.xml?"
-	query := "user_key=" + userKey
-	query += "&provider_key=" + client.ProviderKey
-	for _,element := range usageArr {
-		query += "&usage[" + element.Name + "]=" + strconv.Itoa(element.Value)
+func createURL(client *Client, userKey string, usageArr []Usage) string {
+	var buffer bytes.Buffer
+	buffer.WriteString("https://")
+	buffer.WriteString(client.Host)
+	buffer.WriteString("/transactions/authrep.xml?user_key=")
+	buffer.WriteString(userKey)
+	buffer.WriteString("&provider_key=")
+	buffer.WriteString(client.ProviderKey)
+	for _, element := range usageArr {
+		buffer.WriteString("&usage[")
+		buffer.WriteString(element.Name)
+		buffer.WriteString("]=")
+		buffer.WriteString(strconv.Itoa(element.Value))
 	}
 
-	// fmt.Printf("\n"+"https://"+client.Host+url+query+"\n")
-	request := gorequest.New()
-	res, body, errs := request.Get("https://"+client.Host+url+query).
-		Set("X-3scale-User-Agent", "plugin-golang-v#test").
-		End()
-
-	if errs != nil {
-		// handle error
-	}
-	if res.StatusCode == 200 || res.StatusCode == 409 {
-		fmt.Printf("\n" + "All good")
-		r.Succeed()
-	} else if res.StatusCode >= 400 && res.StatusCode < 409 {
-		fmt.Printf("\n" + "Error"+"\n",body)
-		r.Error(res.StatusCode,"")
-	} else {
-		fmt.Printf("\n" + "Mega error")
-	}
-	fmt.Printf("\n" + body)
-	return *r
+	return buffer.String()
 }
 
-//Response object
+// Response object
 type Response struct {
-	errorCode    int
-	errorMessage string
+	Code    int
+	Message string
 }
 
-//Succeed response
-func (r Response) Succeed() {
-	r.errorCode = 0
-	r.errorMessage = ""
-}
-
-//Error response
-func (r Response) Error(code int, message string) {
-	r.errorCode = code
-	r.errorMessage = message
-}
-
-//IsSuccess checks is response succeed
-func (r Response) IsSuccess() bool {
-	return (r.errorCode == 0 && r.errorMessage == "")
+// IsSuccess checks is response succeed
+func (r *Response) IsSuccess() bool {
+	return (r.Code == http.StatusOK || r.Code == http.StatusConflict)
 }
