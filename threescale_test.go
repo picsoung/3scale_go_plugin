@@ -57,6 +57,13 @@ func TestAuthrepUserKey(t *testing.T) {
 	}
 }
 
+func TestNewClient(t *testing.T) {
+	client := NewClient(providerKey, "")
+	if client.Host != defaultHost {
+		t.Errorf("Client host should default to '%v' but was '%v'", defaultHost, client.Host)
+	}
+}
+
 // RewriteTransport is an http.RoundTripper that rewrites requests
 // using the provided URL's Scheme and Host, and its Path as a prefix.
 // The Opaque field is untouched.

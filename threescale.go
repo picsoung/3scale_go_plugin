@@ -10,6 +10,7 @@ import (
 const (
 	userAgentHeaderKey   = "X-3scale-User-Agent"
 	userAgentHeaderValue = "plugin-golang-v#test"
+	defaultHost          = "su1.3scale.net"
 )
 
 // Client is identified by its ProviderKey and Host
@@ -20,6 +21,10 @@ type Client struct {
 
 // NewClient Creates a new Client
 func NewClient(providerKey, host string) (client *Client) {
+	if host == "" {
+		host = defaultHost
+	}
+
 	return &Client{
 		ProviderKey: providerKey,
 		Host:        host,
